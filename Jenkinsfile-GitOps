@@ -64,9 +64,9 @@ spec:
       container('docker') 
       {
         sh "sed -i 's@image:.*@image: ${image}:${imagetag}@' manifests/application.yaml"
-        sh "sed -i 's@newTag:.*@newTag: ${imagetag}@' kustomize/overlays/prd/kustomization.yaml"
-        sh "sed -i 's@newTag:.*@newTag: ${imagetag}@' kustomize/overlays/stg/kustomization.yaml"
-        sh "sed -i 's@tag:.*@tag: ${imagetag}@' helm/gitops-app/values.yaml"
+        sh "sed -i 's@newTag:.*@newTag: \"${imagetag}\"@' kustomize/overlays/prd/kustomization.yaml"
+        sh "sed -i 's@newTag:.*@newTag: \"${imagetag}\"@' kustomize/overlays/stg/kustomization.yaml"
+        sh "sed -i 's@tag:.*@tag: \"${imagetag}\"@' helm/gitops-app/values.yaml"
       }
     }
     stage('Commit and push to infra repo') 
