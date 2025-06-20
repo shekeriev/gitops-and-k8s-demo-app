@@ -1,0 +1,81 @@
+def label = "docker-${UUID.randomUUID().toString()}"
+
+podTemplate(label: label, yaml: """
+apiVersion: v1
+kind: Pod
+spec:
+  serviceAccountName: jenkins
+  containers:
+  - name: docker
+    image: docker:28.2
+    command:
+    - /bin/cat
+    tty: true  
+    volumeMounts:
+    - name: dockersock
+      mountPath: /var/run/docker.sock
+    - name: docker-config
+      mountPath: /root/.docker/config.json
+      subPath: config.json
+  volumes:
+  - name: dockersock
+    hostPath:
+      path: /var/run/docker.sock
+  - name: docker-config
+    configMap:
+      name: docker-config
+"""
+  ) {
+
+  def namespace = "default"
+  def imagetag = ""
+  def imagedate = new Date().format('yyyy-MM-dd HH:mm:ss')
+  def image = "shekeriev/gitops-app"
+  
+  node(label) 
+  {
+    stage('Clone the app repo') 
+    {
+      git branch: 'main', url: 'http://gitea-http.gitea.svc.cluster.local:3000/dimitar/gitops-app'
+      imagetag = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+    }
+    stage('Build the Docker image') 
+    {
+      container('docker') 
+      {
+        sh "docker build --build-arg VERSION='${imagetag}' --build-arg CREATED='${imagedate}' -t ${image}:${imagetag} ."
+        sh "docker tag ${image}:${imagetag} ${image}:latest"
+      }
+    }
+    stage ("Push the image to Docker Hub")
+    {
+      container('docker') 
+      {
+        sh "docker push ${image}:${imagetag}"
+        sh "docker push ${image}:latest"
+      }
+    }
+    stage('Clone the infra repo') 
+    {
+      git branch: 'main', url: 'http://gitea-http.gitea.svc.cluster.local:3000/dimitar/gitops-app-infra'
+    }
+    stage ("Adjust the image tag in manifests")
+    {
+      container('docker') 
+      {
+        sh "sed -i 's@image:.*@image: ${image}:${imagetag}@' manifests/application.yaml"
+        sh "sed -i 's@newTag:.*@newTag: ${imagetag}@' kustomize/overlays/prd/kustomization.yaml"
+        sh "sed -i 's@newTag:.*@newTag: ${imagetag}@' kustomize/overlays/stg/kustomization.yaml"
+        sh "sed -i 's@tag:.*@tag: ${imagetag}@' helm/gitops-app/values.yaml"
+      }
+    }
+    stage('Commit and push to infra repo') 
+    {
+      withCredentials([gitUsernamePassword(credentialsId: 'git-credentials')]) {
+        sh "git config --global user.email 'dimitar@zahariev.pro'"
+        sh "git commit -am 'Change image tag to ${imagetag}'"
+        sh "git push --set-upstream origin main"
+      }
+    }
+  }
+}

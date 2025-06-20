@@ -1,0 +1,78 @@
+def label = "docker-${UUID.randomUUID().toString()}"
+
+podTemplate(label: label, yaml: """
+apiVersion: v1
+kind: Pod
+spec:
+  serviceAccountName: jenkins
+  containers:
+  - name: docker
+    image: docker:28.2
+    command:
+    - /bin/cat
+    tty: true  
+    volumeMounts:
+    - name: dockersock
+      mountPath: /var/run/docker.sock
+    - name: docker-config
+      mountPath: /root/.docker/config.json
+      subPath: config.json
+  - name: kubectl
+    image: joshendriks/alpine-k8s
+    command:
+    - /bin/cat
+    tty: true  
+    volumeMounts:
+    - name: dockersock
+      mountPath: /var/run/docker.sock
+    - name: docker-config
+      mountPath: /root/.docker/config.json
+      subPath: config.json
+  volumes:
+  - name: dockersock
+    hostPath:
+      path: /var/run/docker.sock
+  - name: docker-config
+    configMap:
+      name: docker-config
+"""
+  ) {
+
+  def namespace = "default"
+  def imagetag = ""
+  def imagedate = new Date().format('yyyy-MM-dd HH:mm:ss')
+  def image = "shekeriev/gitops-app"
+  
+  node(label) 
+  {
+    stage('Clone the repo') 
+    {
+      git branch: 'main', url: 'http://gitea-http.gitea.svc.cluster.local:3000/dimitar/gitops-app'
+      imagetag = sh(script: 'git rev-parse --short HEAD', returnStdout: true).trim()
+    }
+    stage('Build the Docker image') 
+    {
+      container('docker') 
+      {
+        sh "docker build --build-arg VERSION='${imagetag}' --build-arg CREATED='${imagedate}' -t ${image}:${imagetag} ."
+        sh "docker tag ${image}:${imagetag} ${image}:latest"
+      }
+    }
+    stage ("Push the image to Docker Hub")
+    {
+      container('docker') 
+      {
+        sh "docker push ${image}:${imagetag}"
+        sh "docker push ${image}:latest"
+      }
+    }
+    stage ("Apply the changes with kubectl")
+    {
+      container('kubectl') 
+      {
+        sh "sed -i 's@image:.*@image: ${image}:${imagetag}@g' manifests/application.yaml"
+        sh "kubectl apply -n ${namespace} -f manifests/application.yaml"
+      }
+    }
+  }
+}

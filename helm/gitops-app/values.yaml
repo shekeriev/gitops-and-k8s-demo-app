@@ -1,0 +1,14 @@
+# Default values for gitops-app.
+
+replicaCount: 1
+
+image:
+  repository: shekeriev/gitops-app
+  pullPolicy: IfNotPresent
+  tag: "latest"
+
+containerPort: 80
+
+service:
+  type: ClusterIP
+  port: 80
